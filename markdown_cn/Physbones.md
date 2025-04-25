@@ -105,3 +105,101 @@ Polar 稍微复杂一些。如果选取一个 Hinge 并将其扫过偏航 （Yaw
 - Grab Movement - 控制抓取的骨骼的移动方式。零值会导致骨骼使用拉力和弹簧到达抓取位置。值为 1 会导致骨骼立即移动到抓取位置。
 - Snap To Hand - 当骨骼被抓取时，它将对齐到抓取它的骨骼。
 ### Options  选项
+Parameter （参数） - 用于向 avatar 控制器提供多个参数的前缀。在以下项目中，将 Parameter 设置为 Tail 会将 {parameter} 替换为 Tail
+| Parameter Name           | Type   | Description (Chinese)                                                        |
+|--------------------------|--------|------------------------------------------------------------------------------|
+| `{parameter}_IsGrabbed`  | Bool   | 当前是否正在抓取骨骼                                                        |
+| `{parameter}_IsPosed`    | Bool   | 骨头在被抓住后是否摆姿势                                                    |
+| `{parameter}_Angle`      | Float  | 范围 0.0–1.0。末端骨骼的当前位置与其原始静止位置之间的标准化角度，最大值为 1.0 |
+| `{parameter}_Stretch`    | Float  | 范围 0.0–1.0。骨骼与其最大拉伸长度的接近程度                                |
+| `{parameter}_Squish`     | Float  | 范围 0.0–1.0。骨骼与其最大 squish 长度的接近程度                            |
+| `Is Animated`            | Bool   | 允许对骨骼变换进行动画处理，必须启用此选项以支持动画                         |
+| `Reset When Disabled`    | Bool   | 当组件禁用时，骨骼将自动重置到默认位置                                     |
+
+#### 重要说明、使用提示
+**不要让 Constraint 和 PhysBone 组件影响同一个游戏对象 ，因为这会导致执行顺序问题。**
+
+而是将 Constraint 应用于父游戏对象。您仍然可以将 Constraint 的源变换设置为原始游戏对象。
+##### 每个组件的限制
+单个 PhysBone 组件一次不能影响超过 256 个变换。 这将计算根骨骼以及所有子项。 这也会影响 Dynamic Bone 转换！
+
+然而，您首先应该不要让那么多变换进行动画处理。尝试将链中的骨骼向上合并到它们的直接父级。社区创建的工具（如 Cat's Blender Plugin）可以为您完成此作。
+
+Spring、Pull、Stiffness 等 PhysBone 属性在初始化时设置， 无法设置动画 。
+
+但是，如果对 PhysBone 组件的属性进行动画处理，然后关闭再打开该组件的动画， 则可能会获得所需的行为。请注意，这不是为这些属性设置动画的支持方法，并且在将来的更改中将不受支持。（换句话说，它可能会损坏。如果是这样，我们不会尝试修复它。
+
+##### Humanoid Bones  人形骨骼
+
+不要将 Humanoid bones 设置为 PhysBone Root bones。 换句话说，不要将 Hip、Spine、Chest、Upper Chest、Neck、Head 或任何肢体骨骼设置为 Roots。这将导致重大问题。
+
+相反，复制要用作根的骨骼，并将要设置动画的所有子骨骼重新设置为新的复制根的父级。这应该在 Blender 中完成。社区创建的工具（如 Cat's Blender Plugin）可以为您完成此作。
+
+与 Dynamic Bones 不同，PhysBone 链的根骨骼允许旋转，但不能发生平移。这在某些设置下可能会产生一些影响 —— 建议你亲自尝试一下，看看它的具体表现。
+
+##### PhysBone AV3 Parameters  PhysBone AV3 参数
+
+影响参数时， 无需使用 VRCExpressionParameters 对象定义的同步参数 。这些参数已在本地和远程计算机上更新，因为两者都将运行 PhysBones。
+
+##### PhysBone Immobile 行为
+
+Dynamic Bones 的 Inert 值基于组件的放置位置，而不是根变换。这可能是 Dynamic Bones 的错误。因此，PhysBones 的 Immobile 值基于根变换。在某些情况下，这可能会影响行为。
+
+##### Optimal Component Usage  最佳组件使用
+由于 PhysBones 的多线程特性，将所有骨骼放入单个链中并不总是最有效的。多个组件允许我们跨线程分解工作。但是，您仍然应该努力减少组件数量......但是，在你的头像上有一些并不像 Dynamic Bones 那样糟糕。
+如果你真的需要很多，那么当你得到超过 128 个受单个组件影响的变换时，你应该考虑拆分链集。如果你有一件有 256 根骨头的衣服，并且它在根部分裂，那么将其分成两个或三个部分就可以了。
+但是，如果您只是处理 32 块骨头左右的东西......别担心。正如您可能知道的那样，这些并不是严格的规则！我们稍后可能会引入一些软警告，当某些事情看起来应该以不同的方式设置时。
+##### Maximum Bounds  最大边界
+每个 VRCPhysBone 组件都有一个边界框，该边界框会随着骨骼的移动而增大和缩小。这些边界框有助于对玩家触摸和抓取 PhysBones 进行碰撞检测。为了提高效率，边界框被强制限制为最大 10×10×10 米。PhysBones 可以超出此范围并继续按预期工作。但是，玩家可能无法触摸或抓住这些骨头，具体取决于他们的位置。
+边界框仅考虑具有碰撞且半径大于零的骨骼。在您想要提供极长拉伸的情况下，只要发生碰撞的骨骼超过拉伸点，就可以避免达到此最大边界限制。
+### VRCPhysBoneCollider
+定义一个碰撞器，该碰撞器将影响正确配置的 PhysBones。
+![](https://creators.vrchat.com/assets/images/physbones-ac38f46-2022-05-04_18-35-11_Unity-1467cd89f137f3f7b75b110ff2897d5b.png)
+| 参数英文名称（中文名）              | 中文描述                                                                 |
+|-----------------------------------|--------------------------------------------------------------------------|
+| Root Transform（根变换）           | 变换放置此碰撞器的位置。如果为空，则使用此游戏对象的 transform。        |
+| Shape Type（形状类型）            | 此碰撞器使用的碰撞形状的类型。您可以在 Sphere、Capsule 或 Plane 之间选择。 |
+| Radius                             | 从其原点延伸的碰撞体的大小。                                           |
+| Height（高度）                    | 胶囊体沿 Y 轴的高度。                                                  |
+| Position（位置）                  | 位置与根变换的偏移量。                                                 |
+| Rotation                          | 从根变换开始的旋转偏移量。                                             |
+| Inside Bounds                     | 启用后，此碰撞器将在其边界内包含骨骼，而不是将它们保留在其之外。       |
+| Bones As Sphere                   | 启用后，此碰撞器将碰撞半径视为骨骼位置为中心的球体，而非胶囊体。       |
+#### Standard Colliders  标准碰撞体
+在 Avatar Descriptor 中名为“Colliders”的新部分中定义了一组“Standard Colliders”。此部分允许您定义每个头像上存在的许多标准碰撞器。如果您不触摸它，这些将自动设置，但它们也可以进行调整以完全适合您的头像。这些碰撞器不会影响性能评级。
+| 英文名称         | 中文名称   |
+|------------------|------------|
+| Head             | 头         |
+| Torso            | 躯干       |
+| Hands L/R        | 指针 L/R   |
+| Feet L/R         | 英尺 L/R   |
+| Fingers L/R      | 手指 L/R   |
+| Index            | 食指       |
+| Middle           | 中指       |
+| Ring             | 无名指       |
+| Little           | 小拇指         |
+这些碰撞器主要充当其他人可以使用其头像检测到的联系发送端。但是，手指和手部碰撞器也用于创建全局 PhysBone 碰撞器，这些碰撞器可用于影响其他人的 PhysBones。
+#### 自动动态骨骼转换
+默认情况下，客户端会自动将 Dynamic Bones 转换为 PhysBones。这样做是为了提高整体性能，对于虚拟形象之间的交互也是必需的。如果需要，您可以在主菜单的 Performance Options 部分中关闭此选项，但您将失去性能提升和其他人与您交互的能力。
+
+默认情况下，Dynamic Bone 转换使用 Advanced 模式，因为我们能够更精确地将 DB 行为与 Advanced integration 方法匹配。此外，数据库转换对 Multi-Child 类型使用 Ignore。这可能会导致某些极端情况的数据库设置出现问题，但在转换过程中，使用 First 或 Average 几乎在所有情况下都会导致不需要的行为。
+
+关闭转换意味着您将不会与由 Dynamic Bones 驱动的 avatar 骨骼进行任何交互。但是，使用 PhysBones 和 Contacts 的 Avatar 本身不会受到影响。
+
+请务必注意，Dynamic Bones 和 PhysBones 并不相同。 程序内转换过程并不完美，我们打算随着时间的推移对其进行更多更新。但是，请记住：转换过程永远不会完美！自动转换的目标是让大多数设置运行良好并且不会中断，而不是完美地复制行为。 预计所有用户都将逐渐过渡到使用 PhysBones，前提是他们希望他们的头像能够准确渲染并经得起未来考验。
+
+#### 手动动态骨骼转换
+您可以选择使用 SDK 将您的头像从 Dynamic Bones 转换为 PhysBones。
+
+此过程会从您的头像中删除之前的 Dynamic Bone 组件，并且无法轻易撤消。因此，在尝试此转换之前，请备份您的头像。
+
+您可以通过查看`Build Control Panel`或在 Unity 菜单下的`VRChat SDK/Utilities/Convert DynamicBones to PhysBones`您必须事先选择头像才能正常工作。
+
+#### 未迁移的动态骨骼组件
+Dynamic Bones 中的某些功能和行为在 PhysBones 中不存在，并且不会迁移。
+
+`Force` - 忽略 X 或 Z 方向的 Dynamic Bone Gravity 和 Force 值，因为它们在 PhysBones 中没有等效值。
+
+#### 最终动态骨骼弃用
+Dynamic Bones最终将从 VRChat 中完全删除。届时，所有仍在使用 Dynamic Bones 的旧头像都将使用自动转换。
+稍后，我们将给出一个弃用日期，并留出充足的时间让头像作者转换他们想要转换的内容
